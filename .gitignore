@@ -1,0 +1,15 @@
+# Packaged charts and their build output.
+*.tgz
+/dist
+
+# Fetched chart dependencies and lockfiles (none today; charts are self-contained).
+charts/*/charts/
+charts/*/Chart.lock
+
+### macOS ###
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+*.swp

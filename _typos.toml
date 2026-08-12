@@ -1,0 +1,4 @@
+# Spelling exceptions for crate-ci/typos (CI `typos` job + local prek hook).
+[default.extend-words]
+# Upstream project author's GitHub handle (buchgr/bazel-remote).
+buchgr = "buchgr"
