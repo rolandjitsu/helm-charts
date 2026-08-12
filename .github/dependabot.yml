@@ -1,0 +1,16 @@
+version: 2
+updates:
+  # GitHub Actions pinned in the workflows (checkout, setup-helm, knope, typos).
+  # Patch bumps batch into one PR that the dependabot-auto-merge workflow merges
+  # automatically once CI passes; minor and major updates arrive as individual PRs
+  # for manual review. The `ci` prefix keeps the commit subject Conventional
+  # Commits compliant.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
+    groups:
+      actions-patch:
+        update-types: ["patch"]

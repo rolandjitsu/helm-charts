@@ -1,0 +1,23 @@
+# Release automation for the charts in this mono-repo. On push to main, `knope release`
+# reads the Conventional Commits since the last tag, bumps each affected chart's version,
+# updates its changelog, tags, and creates the GitHub release. No PR, no manual step.
+#
+# Each chart is a named package, so tags are per-chart (`<chart>/vX.Y.Z`) and each chart
+# versions independently. knope has no native Helm Chart.yaml support, so the chart
+# `version:` is matched with a regex; the regex deliberately does NOT match `appVersion:`
+# (case-sensitive), which tracks the upstream app and is bumped by hand.
+#
+# Adding a second chart: add another `[packages.<name>]` block, then give EVERY package a
+# `scopes = ["<name>"]` entry so a commit like `feat(foo): ...` maps to one chart. Until
+# scopes exist, all releasable commits drive the single package below.
+
+[packages.bazelremote]
+versioned_files = [
+    { path = "charts/bazelremote/Chart.yaml", regex = '(?m)^version: (?<version>\d+\.\d+\.\d+)' },
+]
+changelog = "charts/bazelremote/CHANGELOG.md"
+
+# Create a GitHub release (not just a git tag) from the tag, using GITHUB_TOKEN in CI.
+[github]
+owner = "rolandjitsu"
+repo = "helm-charts"

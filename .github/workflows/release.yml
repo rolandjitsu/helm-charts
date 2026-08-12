@@ -1,0 +1,87 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# One release at a time; do not cancel one mid-flight.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  CHART_REPO: oci://ghcr.io/rolandjitsu/charts
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      released: ${{ steps.release.outputs.released }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history and tags so knope can read the commits since the last release.
+          fetch-depth: 0
+      - uses: knope-dev/action@v2.1.2
+        with:
+          version: 0.23.0
+      - name: Configure the release identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      # knope bumps the chart version, updates the changelog, tags, and creates the
+      # GitHub release from the conventional commits since the last tag. Pushing with the
+      # built-in token does not retrigger this workflow, so the publish job below runs in
+      # this same run instead. `no_release` (no releasable commits) is a normal no-op.
+      - name: Release
+        id: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          out="$(knope release 2>&1)"
+          code=$?
+          echo "$out"
+          if [ "$code" -eq 0 ]; then
+            # Read the version knope just bumped in the working tree, via the same regex
+            # knope uses. Do NOT derive it from `git tag`: with [github] configured, knope
+            # creates the tag through the GitHub API, so it never appears as a local tag.
+            version="$(knope get-version)"
+            echo "released=true" >> "$GITHUB_OUTPUT"
+            echo "version=${version}" >> "$GITHUB_OUTPUT"
+            echo "::notice::Released bazelremote v${version}."
+          elif echo "$out" | grep -q 'no_release'; then
+            echo "::notice::No releasable commits since the last release; nothing to do."
+            echo "released=false" >> "$GITHUB_OUTPUT"
+          else
+            exit "$code"
+          fi
+
+  # Package and push the chart to GHCR, in the same run that cut the release, at the tag
+  # knope just created (mono-repo tag format: <chart>/v<version>). The published GHCR
+  # package starts private; make it public once to allow anonymous `helm pull`.
+  publish:
+    name: Publish chart
+    needs: release
+    if: needs.release.outputs.released == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: bazelremote/v${{ needs.release.outputs.version }}
+      - uses: azure/setup-helm@v4
+      - name: Package and push the chart
+        run: |
+          helm package charts/bazelremote -d dist
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+          helm push dist/bazelremote-*.tgz "${{ env.CHART_REPO }}"
