@@ -3,7 +3,7 @@ name: bazelremote
 description: Sharded, highly available bazel-remote cache with an HAProxy consistent-hash router.
 type: application
 # Chart version; bumped on every release by knope. Independent of appVersion.
-version: 0.1.0
+version: 0.1.1
 # The bazel-remote release this chart deploys by default. Tracks upstream; bumped
 # manually when moving to a newer bazel-remote (see README).
 appVersion: "v2.6.1"
