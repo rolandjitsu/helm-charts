@@ -91,7 +91,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: bazelremote/v${{ needs.release.outputs.version }}
-      - uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@v5
       - name: Package and push the chart
         run: |
           helm package charts/bazelremote -d dist
