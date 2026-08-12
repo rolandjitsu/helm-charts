@@ -1,0 +1,119 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: '{{ include "bazelremote.fullname" . }}'
+spec:
+  # Each replica is an independent shard with its own strict-local PVC on its
+  # own node. HAProxy consistent-hashes each request to a fixed shard, so a
+  # blob's PUT and GET always agree. See haproxy-configmap.yaml.
+  replicas: {{ .Values.replicas }}
+  serviceName: '{{ include "bazelremote.headlessName" . }}'
+  # Default OrderedReady strategy is intentional: a rollout restarts one shard
+  # at a time, so at most 1/N of the keyspace is cold at once.
+  selector:
+    matchLabels:
+      app: '{{ include "bazelremote.fullname" . }}'
+  template:
+    metadata:
+      labels:
+        app: '{{ include "bazelremote.fullname" . }}'
+    spec:
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # One shard per node (required, not preferred): each shard's storage
+      # replica is strict-local, so co-locating two would share a disk and
+      # defeat the throughput split and resilience. Override via .Values.affinity.
+      affinity:
+        {{- if .Values.affinity }}
+        {{- toYaml .Values.affinity | nindent 8 }}
+        {{- else }}
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: '{{ include "bazelremote.fullname" . }}'
+              topologyKey: kubernetes.io/hostname
+        {{- end }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: bazel-remote-cache
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          ports:
+            - containerPort: 9092
+              name: grpc
+              protocol: TCP
+            - containerPort: 8080
+              name: http
+              protocol: TCP
+          # Slow to fire (3 x 15s): a restart drops the in-memory index and
+          # forces a cold cache, so ride out transient slowness and GC pauses.
+          livenessProbe:
+            grpc:
+              service: /grpc.health.v1.Health/Check
+              port: 9092
+            failureThreshold: 3
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            successThreshold: 1
+            timeoutSeconds: 5
+          readinessProbe:
+            grpc:
+              service: /grpc.health.v1.Health/Check
+              port: 9092
+            failureThreshold: 3
+            periodSeconds: 10
+            successThreshold: 1
+            timeoutSeconds: 5
+          env:
+            # Cap Go parallelism to the CPU request. With no CPU limit set, Go
+            # would size GOMAXPROCS to all host cores and let a bursty write
+            # storm starve neighbors. Keep in sync with resources.requests.cpu.
+            - name: GOMAXPROCS
+              value: {{ .Values.cache.goMaxProcs | quote }}
+            - name: BAZEL_REMOTE_DIR
+              value: /data
+            # Soft LRU eviction target in GiB, ~85% of the per-shard PVC
+            # (storage.size). Eviction lags the bursty write load so on-disk
+            # usage overshoots; the headroom avoids ENOSPC.
+            - name: BAZEL_REMOTE_MAX_SIZE
+              value: {{ .Values.cache.maxSizeGb | quote }}
+            - name: BAZEL_REMOTE_DISABLE_HTTP_AC_VALIDATION
+              value: {{ .Values.cache.disableHttpAcValidation | quote }}
+            # Store blobs uncompressed when the client already compresses before
+            # upload (e.g. ccache with zstd); a second pass only burns CPU.
+            - name: BAZEL_REMOTE_STORAGE_MODE
+              value: {{ .Values.cache.storageMode | quote }}
+            - name: BAZEL_REMOTE_ACCESS_LOG_LEVEL
+              value: {{ .Values.cache.accessLogLevel | quote }}
+            # Expose Prometheus per-endpoint metrics (hit rate, latency, sizes).
+            - name: BAZEL_REMOTE_ENABLE_ENDPOINT_METRICS
+              value: {{ .Values.cache.enableEndpointMetrics | quote }}
+          volumeMounts:
+            - name: cache-data
+              mountPath: /data
+  volumeClaimTemplates:
+    - metadata:
+        name: cache-data
+      spec:
+        {{- with .Values.storage.storageClassName }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: "{{ .Values.storage.size }}"

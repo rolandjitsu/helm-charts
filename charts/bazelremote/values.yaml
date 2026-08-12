@@ -1,0 +1,122 @@
+# bazel-remote container image. Defaults to the upstream public image; override
+# `repository`/`tag` to point at a fork or mirror. An empty `tag` uses the chart's
+# appVersion.
+image:
+  repository: buchgr/bazel-remote-cache
+  tag: ""
+  pullPolicy: IfNotPresent
+# Pull secrets for the shard and router images (e.g. a private registry). Empty for
+# the public defaults.
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+# Number of cache shards, one independent StatefulSet pod per node. Must be <= the
+# number of schedulable nodes (podAntiAffinity is required, see `affinity`). Bumping
+# this reshards ~1/N of the keyspace via consistent hashing.
+replicas: 2
+
+# bazel-remote runtime tuning, surfaced as env on the shard container.
+cache:
+  # Soft LRU eviction target in GiB (BAZEL_REMOTE_MAX_SIZE). Keep at ~85% of
+  # storage.size: eviction lags a bursty write load, so on-disk usage overshoots and
+  # the headroom avoids ENOSPC.
+  maxSizeGb: 425
+  # "uncompressed" or "zstd". Uncompressed is right when the client already compresses
+  # before upload (e.g. ccache with zstd), since a second pass only burns CPU.
+  storageMode: uncompressed
+  disableHttpAcValidation: true
+  # Per-request access logging is pure overhead at high request rates. "none" or the
+  # bazel-remote levels.
+  accessLogLevel: none
+  # Expose Prometheus per-endpoint metrics (hit rate, latency, sizes).
+  enableEndpointMetrics: true
+  # Cap Go parallelism to the CPU request. With no CPU limit set, Go would size
+  # GOMAXPROCS to every host core and let a bursty write storm starve neighbors. Keep
+  # in sync with resources.requests.cpu.
+  goMaxProcs: "6"
+
+storage:
+  # Per-shard PVC size. Keep cache.maxSizeGb at ~85% of this.
+  size: 500Gi
+  # StorageClass for the per-shard PVCs. Empty uses the cluster default class. To have
+  # the chart create a class instead, set createStorageClass=true and reference
+  # storageClass.name here.
+  storageClassName: ""
+  # When true, the chart also renders the StorageClass below. Off by default so the
+  # chart does not create cluster-scoped resources unless asked.
+  createStorageClass: false
+  storageClass:
+    name: bazelremote
+    provisioner: driver.longhorn.io
+    reclaimPolicy: Retain
+    allowVolumeExpansion: true
+    # The cache is regenerable, so a single replica kept local to the pod's node avoids
+    # write amplification and keeps reads/writes local. These defaults target Longhorn;
+    # change them for your provisioner.
+    parameters:
+      numberOfReplicas: "1"
+      dataLocality: strict-local
+      staleReplicaTimeout: "720" # 12 hours in minutes
+
+resources:
+  requests:
+    cpu: "6"
+    # bazel-remote keeps an in-memory index of every entry; it grows as the cache fills.
+    memory: 4Gi
+  limits:
+    # No CPU limit on purpose: a hard limit invites CFS throttling on a
+    # throughput-sensitive cache. Memory is capped to protect the node from OOM.
+    memory: 8Gi
+
+# Grants the pod write access to the PV (avoids mkdir permission denied on /data).
+podSecurityContext:
+  fsGroup: 1000
+
+# Scheduling for the shards. `affinity` empty means the chart applies its built-in
+# required one-shard-per-node podAntiAffinity (fundamental to the strict-local storage
+# model); set `affinity` to override it entirely.
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+service:
+  type: ClusterIP
+  port: 8080
+
+# Consistent-hash router in front of the shards (haproxy-*.yaml).
+haproxy:
+  image:
+    repository: haproxy
+    tag: "3.0"
+    pullPolicy: IfNotPresent
+  # Two routers for HA; both run the identical hashing config.
+  replicas: 2
+  # Cluster DNS FQDN for runtime resolution of shard hostnames, so a rescheduled shard
+  # is picked up without a router restart.
+  resolver: kube-dns.kube-system.svc.cluster.local
+  resources:
+    requests:
+      cpu: "200m"
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+  # `affinity` empty means the chart applies its built-in preferred anti-affinity
+  # (spread the two routers across nodes); set it to override.
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# Optional standard Kubernetes Ingress in front of the public Service. Disabled by
+# default. For non-standard controllers (e.g. a Traefik IngressRoute), leave this off
+# and manage the route as a separate manifest.
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: cache.example.com
+  path: /
+  pathType: Prefix
+  # List of { secretName, hosts: [] } for TLS.
+  tls: []

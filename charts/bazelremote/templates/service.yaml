@@ -1,0 +1,16 @@
+# Public entrypoint an Ingress (or clients) target. Fronts the HAProxy routers,
+# which consistent-hash each request to the right shard.
+apiVersion: v1
+kind: Service
+metadata:
+  name: '{{ include "bazelremote.fullname" . }}'
+  labels:
+    app: '{{ include "bazelremote.haproxyName" . }}'
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    app: '{{ include "bazelremote.haproxyName" . }}'
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: http

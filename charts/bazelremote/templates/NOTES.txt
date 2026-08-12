@@ -1,0 +1,28 @@
+bazelremote is running as {{ include "bazelremote.fullname" . }} with {{ .Values.replicas }} shard(s)
+behind {{ .Values.haproxy.replicas }} HAProxy router(s).
+
+Point Bazel (or another Remote Cache client) at it in-cluster:
+
+    http://{{ include "bazelremote.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.service.port }}
+
+e.g.
+
+    bazel build //... \
+      --remote_cache=http://{{ include "bazelremote.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.service.port }} \
+      --remote_download_minimal
+
+{{ if .Values.ingress.enabled -}}
+Externally, via the Ingress:
+
+    http://{{ .Values.ingress.host }}{{ .Values.ingress.path }}
+{{ else -}}
+No Ingress is enabled. Reach it in-cluster (above), port-forward the Service, or set
+ingress.enabled=true.
+{{ end }}
+Confirm every shard is UP on the router stats page:
+
+    kubectl -n {{ .Release.Namespace }} port-forward deploy/{{ include "bazelremote.haproxyName" . }} 8404:8404
+    # then open http://localhost:8404/
+
+Set your client to soft-fail on remote-cache errors so a single shard outage stays
+invisible (losing one shard makes only ~1/N of keys cold; they miss and refill).

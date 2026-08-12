@@ -1,0 +1,18 @@
+{{- if .Values.storage.createStorageClass }}
+# Optional dedicated StorageClass for the cache volumes. Off by default; the chart
+# otherwise uses whatever storage.storageClassName references (empty = cluster
+# default). The defaults below target Longhorn: the cache is regenerable, so a
+# single replica kept strict-local to the pod's node avoids write amplification
+# and keeps I/O local.
+kind: StorageClass
+apiVersion: storage.k8s.io/v1
+metadata:
+  name: {{ .Values.storage.storageClass.name }}
+provisioner: {{ .Values.storage.storageClass.provisioner }}
+allowVolumeExpansion: {{ .Values.storage.storageClass.allowVolumeExpansion }}
+reclaimPolicy: {{ .Values.storage.storageClass.reclaimPolicy | quote }}
+{{- with .Values.storage.storageClass.parameters }}
+parameters:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,81 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: '{{ include "bazelremote.haproxyName" . }}'
+spec:
+  # Two stateless routers so the routing layer is HA: both run identical configs
+  # and hash every key to the same shard, so a node loss can drop one without
+  # taking the cache offline.
+  replicas: {{ .Values.haproxy.replicas }}
+  selector:
+    matchLabels:
+      app: '{{ include "bazelremote.haproxyName" . }}'
+  template:
+    metadata:
+      labels:
+        app: '{{ include "bazelremote.haproxyName" . }}'
+      annotations:
+        # Roll the routers whenever the routing config changes.
+        checksum/config: {{ include (print $.Template.BasePath "/haproxy-configmap.yaml") . | sha256sum }}
+    spec:
+      {{- with .Values.haproxy.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.haproxy.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # Prefer the two routers on different nodes so a single node loss leaves
+      # one standing. Soft so it still schedules on a small/constrained cluster.
+      # Override via .Values.haproxy.affinity.
+      affinity:
+        {{- if .Values.haproxy.affinity }}
+        {{- toYaml .Values.haproxy.affinity | nindent 8 }}
+        {{- else }}
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: '{{ include "bazelremote.haproxyName" . }}'
+                topologyKey: kubernetes.io/hostname
+        {{- end }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: haproxy
+          image: "{{ .Values.haproxy.image.repository }}:{{ .Values.haproxy.image.tag }}"
+          imagePullPolicy: {{ .Values.haproxy.image.pullPolicy }}
+          resources:
+            {{- toYaml .Values.haproxy.resources | nindent 12 }}
+          ports:
+            - containerPort: 8080
+              name: http
+              protocol: TCP
+            - containerPort: 8404
+              name: stats
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /haproxy-health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /haproxy-health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          volumeMounts:
+            - name: config
+              mountPath: /usr/local/etc/haproxy
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: '{{ include "bazelremote.haproxyName" . }}'

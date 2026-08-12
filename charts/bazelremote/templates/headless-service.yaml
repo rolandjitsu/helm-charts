@@ -1,0 +1,17 @@
+# Headless Service (clusterIP: None) giving each shard a stable per-pod DNS name
+# that HAProxy pins its hash ring to. Only ready pods are published, so a failed
+# shard drops out of DNS and off the ring.
+apiVersion: v1
+kind: Service
+metadata:
+  name: '{{ include "bazelremote.headlessName" . }}'
+  labels:
+    app: '{{ include "bazelremote.fullname" . }}'
+spec:
+  clusterIP: None
+  selector:
+    app: '{{ include "bazelremote.fullname" . }}'
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

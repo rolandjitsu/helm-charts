@@ -1,0 +1,71 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: '{{ include "bazelremote.haproxyName" . }}'
+data:
+  haproxy.cfg: |
+    global
+        log stdout format raw local0 info
+        maxconn 8192
+
+    defaults
+        mode http
+        log global
+        option httplog
+        option dontlognull
+        # Clients stream whole blobs; keep client/server timeouts generous so a
+        # large transfer is never cut off, but bound header-read time.
+        timeout connect 5s
+        timeout client 300s
+        timeout server 300s
+        timeout http-request 15s
+        timeout http-keep-alive 60s
+
+    # Runtime DNS so a rescheduled shard (new pod IP, same hostname) is picked
+    # up without restarting the routers.
+    resolvers kube-dns
+        nameserver dns {{ .Values.haproxy.resolver }}:53
+        resolve_retries 3
+        timeout resolve 1s
+        timeout retry 1s
+        hold valid 10s
+        hold nx 5s
+        hold timeout 5s
+        hold refused 5s
+        hold other 5s
+
+    frontend http_in
+        bind :8080
+        # Peer is an ingress/proxy pod (unstable IP); log the real client from
+        # X-Forwarded-For instead. Safe: routing is by URI, not source.
+        http-request set-src req.hdr_ip(X-Forwarded-For)
+        # HAProxy's own health endpoint, answered locally. Cache keys live under
+        # /ac and /cas, so no clash.
+        monitor-uri /haproxy-health
+        default_backend bazel_remote
+
+    # Read-only stats on a separate port, not mapped by the Service (reachable
+    # via kubectl port-forward). Use it to confirm shards are UP.
+    frontend stats
+        bind :8404
+        stats enable
+        stats uri /
+        stats refresh 10s
+
+    backend bazel_remote
+        # Route by cache key: the blob hash is in the request path, shared by
+        # the storing PUT and the reading GET, so both hash to the same shard.
+        balance uri
+        # Ketama ring: adding or removing a shard remaps only ~1/N of the
+        # keyspace instead of nearly every key.
+        hash-type consistent
+        # Health-check shards over HTTP; a failing shard leaves the ring and its
+        # keys shift to the survivors until it recovers.
+        option httpchk
+        http-check send meth GET uri /status
+        {{- $fullname := include "bazelremote.fullname" . }}
+        {{- $headless := include "bazelremote.headlessName" . }}
+        {{- $ns := .Release.Namespace }}
+        {{- range $i := until (int .Values.replicas) }}
+        server shard{{ $i }} {{ $fullname }}-{{ $i }}.{{ $headless }}.{{ $ns }}.svc.cluster.local:8080 check resolvers kube-dns init-addr last,libc,none
+        {{- end }}
