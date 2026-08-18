@@ -15,6 +15,10 @@ spec:
       app: '{{ include "bazelremote.fullname" . }}'
   template:
     metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       labels:
         app: '{{ include "bazelremote.fullname" . }}'
     spec:

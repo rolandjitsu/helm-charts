@@ -94,6 +94,7 @@ pointing at the Service.
 | `storage.storageClass.*` | Longhorn defaults | Provisioner, reclaim policy, parameters |
 | `resources` | 6 CPU / 4-8Gi | Shard requests/limits (no CPU limit on purpose) |
 | `podSecurityContext.fsGroup` | `1000` | PV write access for the shard |
+| `podAnnotations` | `{}` | Extra annotations on shard pods (e.g. metrics-scraper opt-in) |
 | `nodeSelector` / `tolerations` / `affinity` | `{}` / `[]` / `{}` | Shard scheduling; empty `affinity` uses the required anti-affinity |
 | `service.type` | `ClusterIP` | Public Service type |
 | `service.port` | `8080` | Public Service port |

@@ -70,6 +70,11 @@ resources:
     # throughput-sensitive cache. Memory is capped to protect the node from OOM.
     memory: 8Gi
 
+# Extra annotations for the shard pods, e.g. to opt into a metrics scraper.
+# bazel-remote exposes Prometheus metrics on the service port at /metrics when
+# `cache.enableEndpointMetrics` is true.
+podAnnotations: {}
+
 # Grants the pod write access to the PV (avoids mkdir permission denied on /data).
 podSecurityContext:
   fsGroup: 1000
