@@ -3,6 +3,12 @@
 All notable changes to the `bazelremote` chart are recorded here. This file is
 maintained automatically by [knope](https://knope.tech) from the Conventional
 Commits on each release; new versions are prepended below.
+## 0.1.3 (2026-08-27)
+
+### Features
+
+- add support for setting pod labels
+
 ## 0.1.2 (2026-08-18)
 
 ### Features
