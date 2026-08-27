@@ -75,6 +75,11 @@ resources:
 # `cache.enableEndpointMetrics` is true.
 podAnnotations: {}
 
+# Extra labels for the shard pods, merged after the built-in `app` selector label,
+# which stays fixed so in-place upgrades are not broken. E.g. cost-allocation or
+# network-policy selectors.
+podLabels: {}
+
 # Grants the pod write access to the PV (avoids mkdir permission denied on /data).
 podSecurityContext:
   fsGroup: 1000
